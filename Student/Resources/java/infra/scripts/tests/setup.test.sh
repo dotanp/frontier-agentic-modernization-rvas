@@ -26,7 +26,9 @@ services:
   photoalbum-java-app:
     image: app-test-fixture
     environment:
+      SPRING_DATASOURCE_USERNAME: ${APP_USER:-photoalbum}
       SPRING_DATASOURCE_PASSWORD: ${APP_USER_PASSWORD:?APP_USER_PASSWORD must be set}
+      APP_ADMIN_USERNAME: ${APP_ADMIN_USERNAME:-admin}
       APP_ADMIN_PASSWORD: ${APP_ADMIN_PASSWORD:?APP_ADMIN_PASSWORD must be set}
 COMPOSE
 printf '.env\n' > /fixture/.gitignore
@@ -36,7 +38,7 @@ git -C /fixture add .
 git -C /fixture -c user.name=BootstrapTest -c user.email=test@example.invalid \
     commit --quiet -m "Create offline application fixture"
 
-# Stub VM provisioning boundaries; keep the actual script, RNG and Compose parser.
+# Stub VM provisioning boundaries; keep the actual script and Compose parser.
 for command in apt-get usermod lsb_release dpkg ora2pg psql; do
     printf '#!/bin/sh\nprintf "test-fixture\\n"\n' > "/test-bin/$command"
 done
@@ -108,21 +110,30 @@ fi
 [[ "$(stat -c '%a %u:%g' /opt/photoalbum/.env)" == '600 0:0' ]] \
     || fail "environment file must be accessible only to root"
 
-mapfile -t passwords < <(grep -E '^(ORACLE_PASSWORD|APP_USER_PASSWORD|APP_ADMIN_PASSWORD)=' \
-    /opt/photoalbum/.env | cut -d= -f2-)
-[[ "${#passwords[@]}" == 3 ]] || fail "all three passwords must be present"
-for password in "${passwords[@]}"; do
-    [[ "$password" =~ ^[0-9a-f]{30}$ ]] || fail "password must contain 120 random bits in Oracle-compatible hex"
-    if grep -Fq "$password" /tmp/bootstrap-output /var/log/photoalbum-setup.log; then
-        fail "password appeared in bootstrap logs"
-    fi
+for name in ORACLE_PASSWORD APP_USER APP_USER_PASSWORD APP_ADMIN_USERNAME APP_ADMIN_PASSWORD; do
+    grep -qx "$name=photoalbum" /opt/photoalbum/.env \
+        || fail "$name must use the documented photoalbum demo default"
 done
-[[ "${passwords[0]}" != "${passwords[1]}" && "${passwords[0]}" != "${passwords[2]}" \
-    && "${passwords[1]}" != "${passwords[2]}" ]] || fail "passwords must be independent"
+/usr/local/bin/docker compose --env-file /opt/photoalbum/.env \
+    -f /opt/photoalbum/docker-compose.yml config --format json > /tmp/compose-config.json
+for name in ORACLE_PASSWORD APP_USER APP_USER_PASSWORD SPRING_DATASOURCE_USERNAME \
+    SPRING_DATASOURCE_PASSWORD APP_ADMIN_USERNAME APP_ADMIN_PASSWORD; do
+    grep -Eq "\"$name\"[[:space:]]*:[[:space:]]*\"photoalbum\"([,[:space:]]|$)" /tmp/compose-config.json \
+        || fail "Compose must pass the photoalbum demo default for $name"
+done
 grep -qx up /tmp/compose-actions || fail "Compose startup was not reached"
 grep -qx 'enable photoalbum.service' /tmp/systemctl-actions || fail "reboot persistence was not enabled"
-echo "PASS: fresh bootstrap creates protected credentials and reaches service installation"
+echo "PASS: fresh bootstrap supplies protected photoalbum demo credentials to both services"
 
+cat > /opt/photoalbum/.env <<'ENV'
+ORACLE_PASSWORD=existingOraclePassword92
+APP_USER=existinguser
+APP_USER_PASSWORD=existingSchemaPassword73
+APP_ADMIN_USERNAME=existingadmin
+APP_ADMIN_PASSWORD=existingAdminPassword84
+ENV
+mapfile -t passwords < <(grep -E '^(ORACLE_PASSWORD|APP_USER_PASSWORD|APP_ADMIN_PASSWORD)=' \
+    /opt/photoalbum/.env | cut -d= -f2-)
 cp /opt/photoalbum/.env /tmp/env-before-rerun
 printf 'keep this file\n' > /opt/photoalbum/local-file
 chmod 644 /opt/photoalbum/.env
@@ -138,7 +149,7 @@ for password in "${passwords[@]}"; do
         fail "password appeared in traced bootstrap logs"
     fi
 done
-echo "PASS: rerun preserves the checkout and passwords without leaking them under tracing"
+echo "PASS: rerun preserves custom usernames, passwords and checkout without trace leakage"
 
 printf '#!/bin/sh\nexit 0\n' > /test-bin/sleep
 cat > /test-bin/sqlplus <<'SQLPLUS'
@@ -182,39 +193,3 @@ grep -q 'ORACLE_PASSWORD must be set' /tmp/invalid-env-output || fail "missing c
 [[ ! -s /tmp/compose-actions ]] || fail "invalid credentials must be rejected before pulling or starting services"
 cp /tmp/env-before-rerun /opt/photoalbum/.env
 echo "PASS: invalid existing credentials fail explicitly before any service action"
-
-rm /opt/photoalbum/.env
-cat > /test-bin/openssl <<'OPENSSL'
-#!/bin/sh
-if [ -f /tmp/rng-called ]; then
-    echo "simulated random generator failure" >&2
-    exit 1
-fi
-touch /tmp/rng-called
-exec /usr/bin/openssl "$@"
-OPENSSL
-chmod +x /test-bin/openssl
-: > /tmp/compose-actions
-if bash -x /bootstrap/setup.sh > /tmp/rng-failure-output 2>&1; then
-    fail "random generator failure must stop bootstrap"
-fi
-[[ ! -e /opt/photoalbum/.env ]] || fail "random generator failure left a partial environment file"
-[[ ! -s /tmp/compose-actions ]] || fail "random generator failure must stop service actions"
-grep -q 'simulated random generator failure' /tmp/rng-failure-output || fail "RNG failure was not reported"
-rm /test-bin/openssl
-echo "PASS: RNG failure stops bootstrap without writing partial credentials"
-
-if ! bash -x /bootstrap/setup.sh > /tmp/second-creation-output 2>&1; then
-    fail "bootstrap must recover after a random generator failure"
-fi
-if cmp -s /tmp/env-before-rerun /opt/photoalbum/.env; then
-    fail "separate credential creation reused the same passwords"
-fi
-while IFS='=' read -r name value; do
-    if [[ "$name" == *_PASSWORD ]]; then
-        if grep -Fq "$value" /tmp/second-creation-output /var/log/photoalbum-setup.log; then
-            fail "credential generation leaked a password under tracing"
-        fi
-    fi
-done < /opt/photoalbum/.env
-echo "PASS: separate credential creation generates new passwords without trace leakage"
