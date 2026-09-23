@@ -38,7 +38,7 @@ git -C /fixture add .
 git -C /fixture -c user.name=BootstrapTest -c user.email=test@example.invalid \
     commit --quiet -m "Create offline application fixture"
 
-# Stub VM provisioning boundaries; keep the actual script and Compose parser.
+# Stub VM provisioning boundaries; keep the actual script, RNG and Compose parser.
 for command in apt-get usermod lsb_release dpkg ora2pg psql; do
     printf '#!/bin/sh\nprintf "test-fixture\\n"\n' > "/test-bin/$command"
 done
@@ -110,20 +110,31 @@ fi
 [[ "$(stat -c '%a %u:%g' /opt/photoalbum/.env)" == '600 0:0' ]] \
     || fail "environment file must be accessible only to root"
 
-for name in ORACLE_PASSWORD APP_USER APP_USER_PASSWORD APP_ADMIN_USERNAME APP_ADMIN_PASSWORD; do
+for name in ORACLE_PASSWORD APP_USER APP_USER_PASSWORD; do
     grep -qx "$name=photoalbum" /opt/photoalbum/.env \
         || fail "$name must use the documented photoalbum demo default"
 done
+grep -qx 'APP_ADMIN_USERNAME=admin' /opt/photoalbum/.env \
+    || fail "the website username must default to admin"
+admin_password=$(sed -n 's/^APP_ADMIN_PASSWORD=//p' /opt/photoalbum/.env)
+[[ "$admin_password" =~ ^[0-9a-f]{30}$ ]] || fail "the website password must contain 120 random bits in hex"
+if grep -Fq "$admin_password" /tmp/bootstrap-output /var/log/photoalbum-setup.log; then
+    fail "the generated website password appeared in bootstrap logs"
+fi
 /usr/local/bin/docker compose --env-file /opt/photoalbum/.env \
     -f /opt/photoalbum/docker-compose.yml config --format json > /tmp/compose-config.json
 for name in ORACLE_PASSWORD APP_USER APP_USER_PASSWORD SPRING_DATASOURCE_USERNAME \
-    SPRING_DATASOURCE_PASSWORD APP_ADMIN_USERNAME APP_ADMIN_PASSWORD; do
+    SPRING_DATASOURCE_PASSWORD; do
     grep -Eq "\"$name\"[[:space:]]*:[[:space:]]*\"photoalbum\"([,[:space:]]|$)" /tmp/compose-config.json \
         || fail "Compose must pass the photoalbum demo default for $name"
 done
+grep -Eq '"APP_ADMIN_USERNAME"[[:space:]]*:[[:space:]]*"admin"([,[:space:]]|$)' /tmp/compose-config.json \
+    || fail "Compose must pass the admin website username"
+grep -Eq "\"APP_ADMIN_PASSWORD\"[[:space:]]*:[[:space:]]*\"$admin_password\"([,[:space:]]|$)" /tmp/compose-config.json \
+    || fail "Compose must pass the generated website password"
 grep -qx up /tmp/compose-actions || fail "Compose startup was not reached"
 grep -qx 'enable photoalbum.service' /tmp/systemctl-actions || fail "reboot persistence was not enabled"
-echo "PASS: fresh bootstrap supplies protected photoalbum demo credentials to both services"
+echo "PASS: fresh bootstrap supplies demo database credentials and a protected random admin password"
 
 cat > /opt/photoalbum/.env <<'ENV'
 ORACLE_PASSWORD=existingOraclePassword92
@@ -182,14 +193,45 @@ if env APP_USER_PASSWORD="${passwords[1]}" \
 fi
 echo "PASS: Oracle initialization failures are not reported as success"
 
-sed -i 's/^ORACLE_PASSWORD=.*/ORACLE_PASSWORD=/' /opt/photoalbum/.env
-cp /opt/photoalbum/.env /tmp/invalid-env
-: > /tmp/compose-actions
-if bash /bootstrap/setup.sh > /tmp/invalid-env-output 2>&1; then
-    fail "an empty existing password must fail validation instead of being replaced"
-fi
-cmp -s /tmp/invalid-env /opt/photoalbum/.env || fail "invalid existing credentials were overwritten"
-grep -q 'ORACLE_PASSWORD must be set' /tmp/invalid-env-output || fail "missing credentials were not reported"
-[[ ! -s /tmp/compose-actions ]] || fail "invalid credentials must be rejected before pulling or starting services"
+for name in ORACLE_PASSWORD APP_USER_PASSWORD APP_ADMIN_PASSWORD; do
+    cp /tmp/env-before-rerun /opt/photoalbum/.env
+    sed -i "s/^$name=.*/$name=/" /opt/photoalbum/.env
+    cp /opt/photoalbum/.env /tmp/invalid-env
+    : > /tmp/compose-actions
+    if bash /bootstrap/setup.sh > /tmp/invalid-env-output 2>&1; then
+        fail "an empty existing $name must fail validation instead of being replaced"
+    fi
+    cmp -s /tmp/invalid-env /opt/photoalbum/.env || fail "invalid existing credentials were overwritten"
+    grep -q "$name must be set" /tmp/invalid-env-output || fail "missing $name was not reported"
+    [[ ! -s /tmp/compose-actions ]] || fail "invalid credentials must be rejected before pulling or starting services"
+done
 cp /tmp/env-before-rerun /opt/photoalbum/.env
 echo "PASS: invalid existing credentials fail explicitly before any service action"
+
+rm /opt/photoalbum/.env
+cat > /test-bin/openssl <<'OPENSSL'
+#!/bin/sh
+echo "simulated random generator failure" >&2
+exit 1
+OPENSSL
+chmod +x /test-bin/openssl
+: > /tmp/compose-actions
+if bash -x /bootstrap/setup.sh > /tmp/rng-failure-output 2>&1; then
+    fail "website password generation failure must stop bootstrap"
+fi
+[[ ! -e /opt/photoalbum/.env ]] || fail "random generator failure left a partial environment file"
+[[ ! -s /tmp/compose-actions ]] || fail "random generator failure must stop service actions"
+grep -q 'simulated random generator failure' /tmp/rng-failure-output || fail "RNG failure was not reported"
+rm /test-bin/openssl
+echo "PASS: RNG failure stops bootstrap without writing partial credentials"
+
+if ! bash -x /bootstrap/setup.sh > /tmp/second-creation-output 2>&1; then
+    fail "bootstrap must recover after a random generator failure"
+fi
+new_admin_password=$(sed -n 's/^APP_ADMIN_PASSWORD=//p' /opt/photoalbum/.env)
+[[ "$new_admin_password" =~ ^[0-9a-f]{30}$ ]] || fail "the new website password must contain 120 random bits in hex"
+[[ "$new_admin_password" != "$admin_password" ]] || fail "separate creation reused the website password"
+if grep -Fq "$new_admin_password" /tmp/second-creation-output /var/log/photoalbum-setup.log; then
+    fail "website password generation leaked a password under tracing"
+fi
+echo "PASS: separate creation generates a new website password without trace leakage"
