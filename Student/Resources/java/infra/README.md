@@ -50,7 +50,7 @@ Terraform will output:
 The `setup.sh` script runs automatically at first boot via cloud-init. It:
 - Installs Docker Engine + Docker Compose
 - Clones the PhotoAlbum-Java repository
-- Creates a root-only `/opt/photoalbum/.env` using `photoalbum` for the database app user, website admin user, and all three passwords (demo only, not for production), preserving existing credentials on reruns
+- Creates a root-only `/opt/photoalbum/.env` with `photoalbum` database credentials (demo only, not for production) and website user `admin` with a strong random `APP_ADMIN_PASSWORD`, preserving existing credentials on reruns
 - Runs `docker compose up --build -d`
 - Installs a systemd service for reboot persistence
 

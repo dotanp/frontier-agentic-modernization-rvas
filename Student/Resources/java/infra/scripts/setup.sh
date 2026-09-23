@@ -5,7 +5,7 @@
 # What this script does:
 #   1. Updates the OS and installs Docker Engine + Docker Compose plugin + git
 #   2. Clones the PhotoAlbum-Java repository
-#   3. Creates protected demo credentials and starts Docker Compose (Oracle + Spring Boot)
+#   3. Creates protected credentials and starts Docker Compose (Oracle + Spring Boot)
 #   4. Installs a systemd service so the stack restarts on VM reboot
 #
 # Total first-boot time: ~10 minutes (Oracle initialisation takes 3–5 minutes)
@@ -26,7 +26,7 @@ apt-get upgrade -y
 
 # ── 2. Install Docker Engine ──────────────────────────────────────────────────
 echo "--- Installing Docker Engine..."
-apt-get install -y ca-certificates curl gnupg lsb-release git
+apt-get install -y ca-certificates curl gnupg lsb-release git openssl
 
 # Docker official GPG key
 install -m 0755 -d /etc/apt/keyrings
@@ -144,21 +144,22 @@ fi
 echo "--- Starting PhotoAlbum stack with docker compose..."
 cd "$APP_DIR"
 
-# Fix missing Compose credentials with the documented demo defaults; not for production.
+# Fix missing Compose credentials: demo DB defaults and a random website admin password.
 ENV_FILE="$APP_DIR/.env"
 if [ ! -e "$ENV_FILE" ]; then
     (
         set +x
         umask 077
-        cat > "$ENV_FILE" <<'EOF'
+        APP_ADMIN_PASSWORD=$(openssl rand -hex 15)
+        cat > "$ENV_FILE" <<EOF
 ORACLE_PASSWORD=photoalbum
 APP_USER=photoalbum
 APP_USER_PASSWORD=photoalbum
-APP_ADMIN_USERNAME=photoalbum
-APP_ADMIN_PASSWORD=photoalbum
+APP_ADMIN_USERNAME=admin
+APP_ADMIN_PASSWORD=${APP_ADMIN_PASSWORD}
 EOF
     )
-    echo "--- Created root-only demo credentials in $ENV_FILE."
+    echo "--- Created root-only application credentials in $ENV_FILE."
 fi
 chown root:root "$ENV_FILE"
 chmod 600 "$ENV_FILE"
