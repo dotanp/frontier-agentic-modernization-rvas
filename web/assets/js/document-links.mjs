@@ -1,5 +1,9 @@
 const repositoryUrl = 'https://github.com/microsoft/frontier-agentic-modernization-rvas/blob/main/';
 
+export const RESOURCE_FILES = [
+    { file: 'Student/Resources/java/infra/README.md', title: 'Deploy PhotoAlbum to Azure VM' },
+];
+
 export function resolveDocumentLink(href, sourceFile, pageUrl, documents) {
     if (!href || /^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i.test(href)) return null;
 

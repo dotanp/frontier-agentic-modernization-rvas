@@ -9,6 +9,10 @@ build:
 	@cp -r web/. _site/
 	@# README linked from the page
 	@cp README.md _site/README.md
+	@# PhotoAlbum deployment guide and its screenshot (not Terraform state or configuration)
+	@mkdir -p _site/Student/Resources/java/infra/assets
+	@cp Student/Resources/java/infra/README.md _site/Student/Resources/java/infra/
+	@cp Student/Resources/java/infra/assets/photo-album-running.png _site/Student/Resources/java/infra/assets/
 	@# Student challenge markdown files
 	@for track in java dotnet net8 customer; do \
 		mkdir -p _site/Student/$$track; \

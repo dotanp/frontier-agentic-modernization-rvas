@@ -2703,7 +2703,7 @@
     </div>
 
     <script type="module">
-        import { resolveDocumentLink } from './assets/js/document-links.mjs';
+        import { RESOURCE_FILES, resolveDocumentLink } from './assets/js/document-links.mjs';
 
         // ── Scroll reveal ─────────────────────────────────────────────────
         const observer = new IntersectionObserver(entries => {
@@ -2815,7 +2815,7 @@
 
         let currentIdx = -1;
         let activeFiles = STUDENT_FILES;
-        const documentFiles = [...STUDENT_FILES, ...COACH_FILES].map(entry => entry.file);
+        const documentFiles = [...STUDENT_FILES, ...COACH_FILES, ...RESOURCE_FILES].map(entry => entry.file);
 
         function prepareDocumentLinks(container, sourceFile) {
             container.querySelectorAll('a[href]').forEach(link => {
@@ -2837,8 +2837,10 @@
             // Determine which array owns this file
             const sIdx = STUDENT_FILES.findIndex(f => f.file === mdFile);
             const cIdx = COACH_FILES.findIndex(f => f.file === mdFile);
+            const rIdx = RESOURCE_FILES.findIndex(f => f.file === mdFile);
             if (sIdx !== -1) { activeFiles = STUDENT_FILES; currentIdx = sIdx; }
             else if (cIdx !== -1) { activeFiles = COACH_FILES; currentIdx = cIdx; }
+            else if (rIdx !== -1) { activeFiles = RESOURCE_FILES; currentIdx = rIdx; }
             else { throw new Error(`Document is not available in the drawer: ${mdFile}`); }
             loadAndRender(currentIdx);
             drawer.classList.add('open');
@@ -2866,6 +2868,9 @@
                 const text = await res.text();
                 drawerContent.innerHTML = marked.parse(text);
                 prepareDocumentLinks(drawerContent, entry.file);
+                drawerContent.querySelectorAll('img[src]').forEach(image => {
+                    image.src = new URL(image.getAttribute('src'), new URL(entry.file, location.href)).href;
+                });
             } catch (err) {
                 drawerContent.innerHTML = `<p style="color:var(--stretch-color);font-family:var(--font-body);font-size:.8rem;">Failed to load ${entry.file}: ${err.message}</p>`;
             }

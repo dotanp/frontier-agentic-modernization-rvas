@@ -1,3 +1,5 @@
+[Back to Java prerequisites](../../../java/Challenge-00.md)
+
 # Deploy PhotoAlbum (Legacy Java) to Azure VM
 
 This folder contains Terraform configuration and a Bash setup script that deploys the **PhotoAlbum** Spring Boot 2.7 / Java 8 / Oracle application to an Ubuntu 22.04 Virtual Machine — the "before" state of the modernization journey.
