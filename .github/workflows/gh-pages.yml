@@ -8,6 +8,9 @@ on:
       - 'README.md'
       - 'Student/**'
       - 'Coach/**'
+      - 'tests/**'
+      - 'Makefile'
+      - '.github/workflows/gh-pages.yml'
 
   workflow_dispatch:
 
@@ -32,6 +35,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Test documentation links
+        run: make test
 
       - name: Assemble site
         run: |

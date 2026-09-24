@@ -2702,7 +2702,9 @@
         </div>
     </div>
 
-    <script>
+    <script type="module">
+        import { resolveDocumentLink } from './assets/js/document-links.mjs';
+
         // ── Scroll reveal ─────────────────────────────────────────────────
         const observer = new IntersectionObserver(entries => {
             entries.forEach(e => {
@@ -2813,6 +2815,23 @@
 
         let currentIdx = -1;
         let activeFiles = STUDENT_FILES;
+        const documentFiles = [...STUDENT_FILES, ...COACH_FILES].map(entry => entry.file);
+
+        function prepareDocumentLinks(container, sourceFile) {
+            container.querySelectorAll('a[href]').forEach(link => {
+                const href = link.getAttribute('href');
+                const target = resolveDocumentLink(href, sourceFile, location.href, documentFiles);
+                if (target) {
+                    link.href = target.href;
+                    if (target.file) link.dataset.documentFile = target.file;
+                    if (target.section) link.dataset.siteSection = target.section;
+                }
+                if (!target?.file && !target?.section && /^(?:https?:|\/\/)/i.test(target?.href || href)) {
+                    link.target = '_blank';
+                    link.rel = 'noopener noreferrer';
+                }
+            });
+        }
 
         function openDrawer(mdFile) {
             // Determine which array owns this file
@@ -2820,7 +2839,7 @@
             const cIdx = COACH_FILES.findIndex(f => f.file === mdFile);
             if (sIdx !== -1) { activeFiles = STUDENT_FILES; currentIdx = sIdx; }
             else if (cIdx !== -1) { activeFiles = COACH_FILES; currentIdx = cIdx; }
-            else { activeFiles = STUDENT_FILES; currentIdx = 0; }
+            else { throw new Error(`Document is not available in the drawer: ${mdFile}`); }
             loadAndRender(currentIdx);
             drawer.classList.add('open');
             drawerOverlay.classList.add('open');
@@ -2846,21 +2865,7 @@
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const text = await res.text();
                 drawerContent.innerHTML = marked.parse(text);
-                drawerContent.querySelectorAll('a[href]').forEach(a => {
-                    const href = a.getAttribute('href');
-                    if (href && href.endsWith('.md')) {
-                        a.addEventListener('click', e => {
-                            e.preventDefault();
-                            const base = entry.file.replace(/\/[^\/]+$/, '/');
-                            const resolved = new URL(href, 'http://x/' + base).pathname.replace(/^\//, '');
-                            const match = activeFiles.findIndex(f => f.file === resolved);
-                            if (match !== -1) { currentIdx = match; loadAndRender(match); }
-                        });
-                    } else if (href && (href.startsWith('http') || href.startsWith('//'))) {
-                        a.setAttribute('target', '_blank');
-                        a.setAttribute('rel', 'noopener noreferrer');
-                    }
-                });
+                prepareDocumentLinks(drawerContent, entry.file);
             } catch (err) {
                 drawerContent.innerHTML = `<p style="color:var(--stretch-color);font-family:var(--font-body);font-size:.8rem;">Failed to load ${entry.file}: ${err.message}</p>`;
             }
@@ -2900,14 +2905,17 @@
             if (e.key === 'ArrowRight' && currentIdx < activeFiles.length - 1) { currentIdx++; loadAndRender(currentIdx); }
         });
 
-        // Intercept ALL .md links on the page
+        prepareDocumentLinks(document, 'README.md');
         document.addEventListener('click', e => {
+            if (e.defaultPrevented || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
             const link = e.target.closest('a[href]');
-            if (!link) return;
-            const href = link.getAttribute('href');
-            if (!href || !href.endsWith('.md')) return;
-            e.preventDefault();
-            openDrawer(href);
+            if (!link || link.target === '_blank' || link.hasAttribute('download')) return;
+            if (link.dataset.documentFile) {
+                e.preventDefault();
+                openDrawer(link.dataset.documentFile);
+            } else if (link.dataset.siteSection) {
+                closeDrawer();
+            }
         });
     </script>
     <script src="assets/js/shell.js"></script>

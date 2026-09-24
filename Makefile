@@ -1,4 +1,4 @@
-.PHONY: apm build clean
+.PHONY: apm build clean test
 
 # Default target
 build:
@@ -24,6 +24,9 @@ build:
 clean:
 	@rm -rf _site
 	@echo "Cleaned _site/"
+
+test:
+	node --test tests/*.test.mjs
 
 apm:
 	apm install --target copilot
